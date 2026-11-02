@@ -142,6 +142,19 @@ pip install tfguard          # no dependencies
 pip install "tfguard[mcp]"   # + the MCP server
 ```
 
+> **PyPI status.** The `Publish` job is red for one known reason: PyPI Trusted
+> Publishing has to be registered once in the PyPI UI before the first upload
+> can succeed, and that step is still pending. The tool itself is unaffected —
+> install from the repo instead:
+>
+> ```bash
+> pip install "git+https://github.com/xuange-hu/tfguard.git"
+> pip install "tfguard[mcp] @ git+https://github.com/xuange-hu/tfguard.git"
+> ```
+>
+> Once the trusted publisher is registered the same job publishes to PyPI and
+> the two commands above work as written.
+
 ## Three steps
 
 ```bash
