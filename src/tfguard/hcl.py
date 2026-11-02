@@ -32,6 +32,9 @@ from typing import Any
 
 PUNCT = (
     ("<<", "HEREDOC"),
+    # Argument expansion: "merge(a, b)...". It has to be matched before the
+    # single dot, or "..." lexes as three attribute accesses.
+    ("...", "ELLIPSIS"),
     ("&&", "AND"),
     ("||", "OR"),
     ("==", "EQ"),
@@ -83,7 +86,10 @@ BINPREC = {
 }
 
 IDENT_START = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
-IDENT_BODY = IDENT_START | set("0123456789-.")
+# Deliberately no "." here: a dotted path is assembled in the parser's
+# postfix loop, where "a.b" can be told apart from the "..." expansion
+# marker. Lexing the dot into the identifier swallowed "local.b..." whole.
+IDENT_BODY = IDENT_START | set("0123456789-")
 DIGITS = set("0123456789")
 
 
@@ -873,6 +879,9 @@ class Parser:
                 args: list[Expr] = []
                 while not self.at("RPAREN") and not self.at("EOF"):
                     args.append(self.parse_expr())
+                    # "merge(one, two)...": the expansion marker belongs to the
+                    # argument before it, and it is not an expression.
+                    self.accept("ELLIPSIS")
                     self.accept("COMMA")
                 self.expect("RPAREN")
                 node = Call(node.path, args, node.line)
@@ -966,6 +975,12 @@ class Parser:
                 self.accept("FATARROW")
                 inner.append(self.parse_expr())
             else:
+                inner.append(self.parse_expr())
+            # The optional filter: "[for x in y : x if x.enabled]". It is in
+            # every popular module and it is not an operator, so it has to be
+            # consumed here — the expression parser would stop at the closer.
+            if self.at("IDENT") and self.peek().value == "if":
+                self.next()
                 inner.append(self.parse_expr())
             self.expect(closer)
             return For_(opener, inner, t.line, tuple(binds))

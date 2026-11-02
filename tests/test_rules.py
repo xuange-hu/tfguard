@@ -460,3 +460,81 @@ def test_rule_metadata_round_trips(rule):
         "supply",
         "relationship",
     }
+
+
+# --------------------------------------------------------------------------
+# Real-world shapes: these came from pointing tfguard at terraform-aws-modules
+# and reading what it complained about. Three of the complaints were wrong.
+# --------------------------------------------------------------------------
+
+
+def test_a_bucket_with_a_standalone_encryption_resource_is_clean(rules):
+    # Provider v4 moved bucket settings into resources of their own. A bucket
+    # configured that way has no inline block to find.
+    got = rules(
+        {
+            "main.tf": 'resource "aws_s3_bucket" "b" {\n  bucket = "b"\n}\n',
+            "sse.tf": 'resource "aws_s3_bucket_server_side_encryption_configuration" "b" {\n'
+            "  bucket = aws_s3_bucket.b.id\n"
+            "  rule {\n    apply_server_side_encryption_by_default {\n      sse_algorithm = \"aws:kms\"\n    }\n  }\n}\n",
+        }
+    )
+    assert "TFG010" not in got
+
+
+def test_a_bucket_with_standalone_versioning_and_logging_is_clean(rules):
+    got = rules(
+        {
+            "main.tf": 'resource "aws_s3_bucket" "b" {\n  bucket = "b"\n}\n',
+            "v.tf": 'resource "aws_s3_bucket_versioning" "b" {\n  bucket = aws_s3_bucket.b.id\n}\n',
+            "l.tf": 'resource "aws_s3_bucket_logging" "b" {\n  bucket = aws_s3_bucket.b.id\n}\n',
+        }
+    )
+    assert "TFG014" not in got
+    assert "TFG020" not in got
+
+
+def test_a_bucket_with_nothing_at_all_is_still_reported(rules):
+    got = rules('resource "aws_s3_bucket" "b" {\n  bucket = "b"\n}\n')
+    assert {"TFG010", "TFG014", "TFG020"} <= got
+
+
+def test_the_standalone_public_access_block_resource_is_not_a_bucket(rules):
+    # aws_s3_bucket_public_access_block is a setting, not a bucket: it has no
+    # encryption, versioning or logging of its own to be missing.
+    got = rules(
+        'resource "aws_s3_bucket_public_access_block" "this" {\n  bucket = aws_s3_bucket.this.id\n}\n'
+    )
+    assert "TFG010" not in got
+    assert "TFG014" not in got
+    assert "TFG020" not in got
+
+
+def test_the_standalone_public_access_block_reports_when_it_blocks_nothing(rules):
+    got = rules(
+        'resource "aws_s3_bucket_public_access_block" "this" {\n'
+        "  bucket                  = aws_s3_bucket.this.id\n"
+        "  block_public_acls       = false\n"
+        "  block_public_policy     = false\n"
+        "  ignore_public_acls      = false\n"
+        "  restrict_public_buckets = false\n"
+        "}\n"
+    )
+    assert "TFG052" in got
+
+
+def test_a_registry_module_with_a_version_is_pinned(rules):
+    got = rules(
+        'module "kms" {\n  source  = "terraform-aws-modules/kms/aws"\n  version = "4.0.0"\n}\n'
+    )
+    assert "TFG063" not in got
+
+
+def test_a_registry_module_without_a_version_is_not(rules):
+    got = rules('module "vpc" {\n  source = "terraform-aws-modules/vpc/aws"\n}\n')
+    assert "TFG063" in got
+
+
+def test_a_local_module_path_is_pinned_by_its_commit(rules):
+    got = rules('module "vpc" {\n  source = "./modules/vpc"\n}\n')
+    assert "TFG063" not in got

@@ -73,6 +73,24 @@ def _absent(block: Block, name: str) -> bool:
     return block.body.attr(name) is None and block.body.block(name) is None
 
 
+class _Ctx:
+    """What the whole workspace contains, so a block can be read in context.
+
+    Provider v4 split several bucket settings into resources of their own.
+    Reading one block at a time cannot tell "no encryption configured" from
+    "configured in the resource next door", so the types present are collected
+    up front.
+    """
+
+    __slots__ = ("types",)
+
+    def __init__(self, types: set[str]):
+        self.types = types
+
+    def has(self, resource_type: str) -> bool:
+        return resource_type in self.types
+
+
 def _add(
     report: Report,
     loaded: LoadedFile,
@@ -315,33 +333,45 @@ def _check_standalone_sg_rule(report: Report, loaded: LoadedFile, block: Block) 
         _add(report, loaded, "TFG002", rec["line"], note=f"ports {lo}-{hi}")
 
 
-def _check_s3(report: Report, loaded: LoadedFile, block: Block) -> None:
-    if _absent(block, "server_side_encryption_configuration"):
+def _check_s3(report: Report, loaded: LoadedFile, block: Block, ctx: _Ctx) -> None:
+    # Since provider v4 the bucket settings can live in their own resources:
+    # aws_s3_bucket_server_side_encryption_configuration and friends. A bucket
+    # that configures encryption that way has no inline block to find, so
+    # reporting it would be a false positive on every modern configuration.
+    if "aws_s3_bucket_server_side_encryption_configuration" not in ctx.types and _absent(
+        block, "server_side_encryption_configuration"
+    ):
         _add(report, loaded, "TFG010", block.line)
     acl = block.attr("acl")
     if acl is not None:
         value = acl.value.as_py()
         if isinstance(value, str) and value.lower() in PUBLIC_ACLS:
             _add(report, loaded, "TFG011", acl.line)
-    ver = block.body.block("versioning")
-    if ver is None:
-        _add(report, loaded, "TFG014", block.line)
-    else:
-        enabled = ver.attr("enabled")
-        if enabled is None or _is_false(enabled.value):
-            _add(report, loaded, "TFG014", ver.line)
-    if _absent(block, "logging"):
+    if "aws_s3_bucket_versioning" not in ctx.types:
+        ver = block.body.block("versioning")
+        if ver is None:
+            _add(report, loaded, "TFG014", block.line)
+        else:
+            enabled = ver.attr("enabled")
+            if enabled is None or _is_false(enabled.value):
+                _add(report, loaded, "TFG014", ver.line)
+    if "aws_s3_bucket_logging" not in ctx.types and _absent(block, "logging"):
         _add(report, loaded, "TFG020", block.line)
 
     pab = block.body.block("public_access_block")
     if pab is not None:
-        flags = []
-        for name in PUBLIC_BLOCK_FLAGS:
-            a = pab.attr(name)
-            if a is None or _is_false(a.value):
-                flags.append(name)
-        if len(flags) == len(PUBLIC_BLOCK_FLAGS):
-            _add(report, loaded, "TFG052", pab.line)
+        _check_public_access_flags(report, loaded, pab.body.attrs(), pab.line)
+
+
+def _check_public_access_flags(report: Report, loaded: LoadedFile, attrs: list[Attribute], line: int) -> None:
+    """A public access block that sets nothing is not protection."""
+    given = {a.name for a in attrs}
+    off = [n for n in PUBLIC_BLOCK_FLAGS if n not in given]
+    for a in attrs:
+        if a.name in PUBLIC_BLOCK_FLAGS and _is_false(a.value):
+            off.append(a.name)
+    if len(set(off)) == len(PUBLIC_BLOCK_FLAGS):
+        _add(report, loaded, "TFG052", line)
 
 
 def _check_storage(report: Report, loaded: LoadedFile, block: Block) -> None:
@@ -886,12 +916,12 @@ def _check_workspace(report: Report, files: list[LoadedFile]) -> None:
             if value.startswith("git::") or value.startswith("github.com/") or value.startswith("git@"):
                 if "ref=" not in value:
                     _add(report, loaded, "TFG063", src.line, note="git source without ref=")
-            elif "//" in value or value.startswith("./") or value.startswith("../"):
+            elif value.startswith("./") or value.startswith("../") or value.startswith("/"):
                 pass  # a local path is pinned by the commit it sits in
-            else:
-                parts = [p for p in value.split("/") if p]
-                if len(parts) < 4:
-                    _add(report, loaded, "TFG063", src.line, note="registry source without a version")
+            elif block.attr("version") is None:
+                # A registry source pins with a version argument, not with a
+                # path segment: "namespace/name/provider" plus version = "4.0.0".
+                _add(report, loaded, "TFG063", src.line, note="registry source without a version")
 
 
 # --------------------------------------------------------------------------
@@ -911,6 +941,13 @@ def scan_documents(files: list[LoadedFile]) -> Report:
     scope = _build_scope(parsed)
     _check_variables(report, scope)
 
+    types: set[str] = set()
+    for loaded in parsed:
+        for block in loaded.doc.all_blocks():
+            if block.kind == "resource":
+                types.add(block.type)
+    ctx = _Ctx(types)
+
     for loaded in parsed:
         for block in loaded.doc.all_blocks():
             # A data block's `type` is the provider type it reads, so it has to
@@ -923,8 +960,12 @@ def scan_documents(files: list[LoadedFile]) -> Report:
                 _check_security_group(report, loaded, block)
             elif t == "aws_security_group_rule":
                 _check_standalone_sg_rule(report, loaded, block)
-            elif t in ("aws_s3_bucket", "aws_s3_bucket_public_access_block"):
-                _check_s3(report, loaded, block)
+            elif t == "aws_s3_bucket":
+                _check_s3(report, loaded, block, ctx)
+            elif t == "aws_s3_bucket_public_access_block":
+                # A standalone config resource, not a bucket: it has no
+                # encryption, versioning or logging of its own to be missing.
+                _check_public_access_flags(report, loaded, block.body.attrs(), block.line)
             elif t in (
                 "aws_ebs_volume",
                 "aws_db_instance",

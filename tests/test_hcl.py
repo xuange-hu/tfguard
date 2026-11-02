@@ -306,3 +306,122 @@ def test_list_requires_commas_so_it_does_not_swallow_next_attribute():
     doc = parse('locals {\n  a = [1]\n  b = 2\n}\n')
     values = {a.name: a.value.as_py() for a in doc.body.block("locals").body.attrs()}
     assert values == {"a": [1], "b": 2}
+
+
+# --------------------------------------------------------------------------
+# Shapes taken from what the popular public modules actually write.
+# --------------------------------------------------------------------------
+
+
+def test_for_expression_with_an_if_filter():
+    # "{ for k, v in var.listeners : k => v if local.create }" is everywhere in
+    # terraform-aws-modules; the filter is not an operator and must be consumed
+    # by the for-expression itself.
+    doc = parse('locals {\n  m = { for k, v in var.tags : k => v if local.create }\n}\n')
+    value = doc.body.block("locals").attr("m").value
+    assert [r.path for r in value.refs()] == ["var.tags", "local.create"]
+
+
+def test_for_expression_with_an_if_filter_in_a_list():
+    doc = parse('locals {\n  xs = [for s in var.names : s if s.enabled]\n}\n')
+    value = doc.body.block("locals").attr("xs").value
+    # Only var.names is a reference into the workspace: "s" and "s.enabled"
+    # are the loop binding, and reporting them as references would make the
+    # taint graph point at something that does not exist.
+    assert [r.path for r in value.refs()] == ["var.names"]
+
+
+def test_for_expression_filter_with_a_boolean_expression():
+    doc = parse(
+        "locals {\n"
+        "  m = { for k, v in var.tags : k => v if local.create && k != \"Name\" }\n"
+        "}\n"
+    )
+    value = doc.body.block("locals").attr("m").value
+    paths = [r.path for r in value.refs()]
+    assert "var.tags" in paths and "local.create" in paths
+
+
+def test_function_argument_expansion():
+    # "merge(a, b)..." — the expansion marker belongs to the argument before it.
+    doc = parse('locals {\n  m = merge(local.a, local.b...)\n}\n')
+    value = doc.body.block("locals").attr("m").value
+    assert [r.path for r in value.refs()] == ["local.a", "local.b"]
+
+
+def test_expansion_does_not_break_the_next_attribute():
+    doc = parse('locals {\n  m = merge(local.a...)\n  n = 2\n}\n')
+    values = {a.name for a in doc.body.block("locals").body.attrs()}
+    assert values == {"m", "n"}
+
+
+def test_a_resource_body_after_a_function_call_attribute():
+    doc = parse(
+        'resource "aws_lb" "x" {\n'
+        "  name = lower(var.name)\n"
+        "  access_logs {\n"
+        "    enabled = true\n"
+        "  }\n"
+        "}\n"
+    )
+    block = doc.body.blocks()[0]
+    assert block.attr("name").value.as_py() == "lower(...)"
+    assert block.body.block("access_logs") is not None
+
+
+def test_module_inputs_with_nested_objects():
+    doc = parse(
+        'module "vpc" {\n'
+        "  source = \"terraform-aws-modules/vpc/aws\"\n"
+        "  version = \"5.0.0\"\n"
+        "  azs = [\"a\", \"b\"]\n"
+        "  public_subnets = [for i in range(2) : cidrsubnet(var.cidr, 8, i)]\n"
+        "  tags = {\n"
+        "    Name = \"vpc\"\n"
+        "  }\n"
+        "}\n"
+    )
+    m = doc.body.blocks()[0]
+    assert m.labels == ["vpc"]
+    assert m.attr("tags").value.as_py() == {"Name": "vpc"}
+    assert m.attr("public_subnets").value.as_py() == "<for [>"
+
+
+def test_variables_file_shape():
+    doc = parse(
+        'variable "name" {\n'
+        "  description = \"Name\"\n"
+        "  type        = string\n"
+        "  default     = null\n"
+        "  validation {\n"
+        "    condition     = length(var.name) > 0\n"
+        "    error_message = \"must not be empty\"\n"
+        "  }\n"
+        "}\n"
+    )
+    v = doc.body.blocks()[0]
+    assert v.attr("default").value.as_py() is None
+    validation = v.body.block("validation")
+    assert validation.attr("condition").value.as_py() == "<>>"
+
+
+def test_outputs_file_shape():
+    doc = parse(
+        'output "id" {\n'
+        "  description = \"id\"\n"
+        "  value       = aws_vpc.this[0].id\n"
+        "  sensitive   = false\n"
+        "}\n"
+    )
+    o = doc.body.blocks()[0]
+    assert o.kind == "output"
+    # An index access keeps the base reference; the exact index is not
+    # resolvable without evaluating the expression.
+    assert o.attr("value").value.as_py() == "aws_vpc.this"
+
+
+def test_conditional_map_lookup_chain():
+    doc = parse('locals {\n  v = local.create ? { a = 1 } : { a = 2 }\n}\n')
+    value = doc.body.block("locals").attr("v").value
+    assert value.as_py() == "<cond>"
+    assert [r.path for r in value.refs()] == ["local.create"]
