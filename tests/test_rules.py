@@ -183,6 +183,32 @@ def test_tfg023_clean_when_a_flow_log_points_at_it(rules):
     )
 
 
+def test_tfg023_silent_when_the_flow_log_takes_its_target_from_a_variable(rules):
+    # The child-module shape: modules/flow-log has vpc_id = var.vpc_id and the
+    # root module wires it up. Scanning the tree as one workspace must not say
+    # the VPC has no flow log -- we cannot prove that.
+    assert "TFG023" not in rules(
+        {
+            "main.tf": 'resource "aws_vpc" "v" {\n  cidr_block = "10.0.0.0/16"\n}\n',
+            "flow-log.tf": 'resource "aws_flow_log" "this" {\n  vpc_id = var.vpc_id\n}\n',
+        }
+    )
+
+
+def test_tfg023_still_fires_when_every_flow_log_is_bound_to_something_else(rules):
+    # A workspace that declares a bound flow log for one VPC still owes an
+    # answer for the other one. Only the unbound case is ambiguous.
+    assert "TFG023" in rules(
+        {
+            "main.tf": 'resource "aws_vpc" "v" {\n  cidr_block = "10.0.0.0/16"\n}\n',
+            "other.tf": (
+                'resource "aws_vpc" "other" {\n  cidr_block = "10.1.0.0/16"\n}\n'
+                'resource "aws_flow_log" "f" {\n  vpc_id = aws_vpc.other.id\n}\n'
+            ),
+        }
+    )
+
+
 # ---------------------------------------------------------------- identity
 
 

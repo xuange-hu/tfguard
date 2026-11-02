@@ -725,6 +725,7 @@ def _check_relationships(report: Report, files: list[LoadedFile]) -> None:
     outputs: list[tuple[Block, LoadedFile]] = []
     vpcs: list[tuple[Block, LoadedFile]] = []
     flow_log_targets: set[str] = set()
+    unbound_flow_logs = 0
 
     for loaded in files:
         if loaded.doc is None:
@@ -745,8 +746,17 @@ def _check_relationships(report: Report, files: list[LoadedFile]) -> None:
                 vpcs.append((block, loaded))
             elif t == "aws_flow_log":
                 a = block.attr("vpc_id")
-                for r in _refs_to(a.value if a else None, "aws_vpc"):
-                    flow_log_targets.add(r)
+                found = _refs_to(a.value if a else None, "aws_vpc")
+                if found:
+                    flow_log_targets.update(found)
+                else:
+                    # vpc_id comes from a variable or a data source, so this
+                    # flow log cannot be tied back to an address here. The
+                    # child-module pattern (aws_flow_log inside modules/flow-log
+                    # taking vpc_id = var.vpc_id) is exactly this shape, and it
+                    # is on every registry module that ships logging. Absence
+                    # of a bound target is not evidence of a missing log.
+                    unbound_flow_logs += 1
             elif t == "output":
                 outputs.append((block, loaded))
 
@@ -824,10 +834,14 @@ def _check_relationships(report: Report, files: list[LoadedFile]) -> None:
                                 flow=f"{'.'.join(path.split('.')[:3])} -> {block.address}",
                             )
 
-    # TFG023: a VPC nobody attached a flow log to.
-    for block, loaded in vpcs:
-        if f"aws_vpc.{block.name}" not in flow_log_targets:
-            _add(report, loaded, "TFG023", block.line)
+    # TFG023: a VPC nobody attached a flow log to. Suppressed for the whole
+    # workspace when an unbound flow log exists -- we cannot prove the VPC is
+    # uncovered, and a false positive on the flagship registry modules is worse
+    # than a missed finding. The demo keeps firing because its flow log is bound.
+    if not unbound_flow_logs:
+        for block, loaded in vpcs:
+            if f"aws_vpc.{block.name}" not in flow_log_targets:
+                _add(report, loaded, "TFG023", block.line)
 
     # TFG075: an output publishing a credential-shaped variable.
     for block, loaded in outputs:
