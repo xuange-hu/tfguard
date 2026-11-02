@@ -188,3 +188,30 @@ def test_explain_flag_adds_why_and_fix(capsys, tmp_path):
     assert code == 0
     assert "why:" in out
     assert "fix:" in out
+
+
+def test_emit_falls_back_to_the_buffer_when_the_console_is_narrow(monkeypatch):
+    """The Windows runner's console is cp1252; the report is not ASCII.
+
+    Without the buffer fallback the report dies with UnicodeEncodeError before
+    a single finding reaches the reader.
+    """
+    import io
+
+    import tfguard.cli as cli
+
+    class _Narrow:
+        encoding = "cp1252"
+
+        def __init__(self):
+            self.buffer = io.BytesIO()
+
+        def write(self, text):
+            # A console that cannot encode the report's separators.
+            self.buffer.write(text.encode(self.encoding))
+
+    narrow = _Narrow()
+    monkeypatch.setattr("sys.stdout", narrow)
+    cli._emit("tfguard · ─── → 3 critical", None)
+    assert narrow.buffer.getvalue(), "the report must reach the reader, not die"
+    assert "critical" in narrow.buffer.getvalue().decode("utf-8", "replace")

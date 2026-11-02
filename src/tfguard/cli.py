@@ -7,6 +7,7 @@ and the MCP tool `.tfguard_scan` cannot disagree about what a workspace means.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 
@@ -103,12 +104,38 @@ def _rank(severity: str) -> int:
     return SEVERITIES.index(severity)
 
 
+def _use_utf8_stdout() -> None:
+    """Make the console tolerate the report's non-ASCII.
+
+    The Windows runner's console codepage is cp1252, and the text report
+    carries box-drawing characters and a middle dot. Without this, printing
+    it raises UnicodeEncodeError before a single finding reaches the reader.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        with contextlib.suppress(ValueError, OSError):  # a closed or unusual stream
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def _emit(text: str, output: str | None) -> None:
     if output:
         with open(output, "w", encoding="utf-8") as fh:
             fh.write(text if text.endswith("\n") else text + "\n")
         return
-    sys.stdout.write(text + "\n")
+    payload = text + "\n"
+    try:
+        sys.stdout.write(payload)
+    except UnicodeEncodeError:
+        # Still the narrow-console case when reconfigure was unavailable, for
+        # example under a test that captured stdout before this ran.
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is not None:
+            buffer.write(payload.encode("utf-8", "replace"))
+            buffer.flush()
+        else:
+            sys.stdout.write(payload.encode("ascii", "replace").decode("ascii"))
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -225,6 +252,7 @@ def cmd_graph(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _use_utf8_stdout()
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "command", None):
