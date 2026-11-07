@@ -1,5 +1,7 @@
 # tfguard
 
+[中文说明 / Chinese README](README_CN.md)
+
 **Terraform / OpenTofu configuration audit. 40 rules, an HCL2 parser written
 from scratch, credential tracing and cross-block relationships — with zero
 dependencies.**
