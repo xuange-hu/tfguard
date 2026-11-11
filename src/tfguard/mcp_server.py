@@ -182,9 +182,8 @@ def build_server():
     from mcp.server.fastmcp import FastMCP  # noqa: PLC0415 - optional dependency
 
     mcp = FastMCP("tfguard")
-    manifest = {t["name"] for t in tool_manifest()}
+    descriptions = {t["name"]: t["description"] for t in tool_manifest()}
 
-    @mcp.tool(name="tfguard_scan")
     def scan(
         path: str,
         min_severity: str = "info",
@@ -193,27 +192,36 @@ def build_server():
     ) -> str:
         return tfguard_scan_tool(path, min_severity, category or None, fmt)
 
-    @mcp.tool(name="tfguard_rules")
     def rules(category: str = "") -> str:
         return tfguard_rules_tool(category or None)
 
-    @mcp.tool(name="tfguard_explain")
     def explain(rule: str) -> str:
         return tfguard_explain_tool(rule)
 
-    @mcp.tool(name="tfguard_parse")
     def parse(path: str) -> str:
         return tfguard_parse_tool(path)
 
-    @mcp.tool(name="tfguard_taint")
     def taint(path: str) -> str:
         return tfguard_taint_tool(path)
 
-    @mcp.tool(name="tfguard_demo")
     def demo(directory: str = "demo-workspace") -> str:
         return tfguard_demo_tool(directory)
 
-    assert manifest, "the manifest is what tests assert against"
+    # FastMCP reads fn.__doc__ at registration time; copy the manifest's
+    # description onto each wrapper *before* mcp.tool() runs so the agent
+    # sees the same text the tests and docs promise.
+    for name, fn in (
+        ("tfguard_scan", scan),
+        ("tfguard_rules", rules),
+        ("tfguard_explain", explain),
+        ("tfguard_parse", parse),
+        ("tfguard_taint", taint),
+        ("tfguard_demo", demo),
+    ):
+        fn.__doc__ = descriptions[name]
+        mcp.tool(name=name)(fn)
+
+    assert descriptions, "the manifest is what tests assert against"
     return mcp
 
 
