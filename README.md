@@ -49,6 +49,25 @@ tfguard · 8 critical  16 high  23 medium  5 low  2 info · 11 file(s), 23 resou
 
 ---
 
+## Contents
+
+- [Why another IaC scanner](#why-another-iac-scanner)
+  - [1. It reads HCL2 itself](#1-it-reads-hcl2-itself)
+  - [2. Credentials are traced to their origin, not matched where they land](#2-credentials-are-traced-to-their-origin-not-matched-where-they-land)
+  - [3. A third pass reads the relationships](#3-a-third-pass-reads-the-relationships)
+  - [4. Absent is not the same as empty](#4-absent-is-not-the-same-as-empty)
+- [Install](#install)
+- [Three steps](#three-steps)
+- [Use it as a gate](#use-it-as-a-gate)
+- [Suppress with a reason](#suppress-with-a-reason)
+- [GitHub Actions](#github-actions)
+- [Clade: six MCP tools](#clade-six-mcp-tools)
+- [The rules](#the-rules)
+- [What it does not do](#what-it-does-not-do)
+- [Development](#development)
+- [Related](#related)
+- [License](#license)
+
 ## Why another IaC scanner
 
 The established tools are good and they are not small: `checkov` pulls a
