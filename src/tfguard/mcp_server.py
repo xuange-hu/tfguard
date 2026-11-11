@@ -56,6 +56,13 @@ def tool_manifest() -> list[dict]:
             "name": "tfguard_demo",
             "description": "Write a deliberately hostile Terraform workspace and report on it.",
         },
+        {
+            "name": "tfguard_graph",
+            "description": (
+                "Print the relationships between blocks as `source .attribute -> target` lines, "
+                "so an agent can see what references what without reading every file."
+            ),
+        },
     ]
 
 
@@ -177,6 +184,25 @@ def tfguard_demo_tool(directory: str = "demo-workspace") -> str:
     )
 
 
+def tfguard_graph_tool(path: str) -> str:
+    """`src .attr -> dst` lines for every reference between blocks."""
+    from tfguard.analyze import _refs_to  # noqa: PLC0415 - the private helper is the graph
+    from tfguard.loader import load_path  # noqa: PLC0415
+
+    files = load_path(path, base=path)
+    edges: list[tuple[str, str, str]] = []
+    for loaded in files:
+        if loaded.doc is None:
+            continue
+        for block in loaded.doc.all_blocks():
+            for attr in block.body.attrs():
+                for prefix in ("aws_security_group", "aws_vpc", "aws_iam_role"):
+                    for target in _refs_to(attr.value, prefix):
+                        edges.append((block.address, attr.name, target))
+    lines = [f"{src} .{attr} -> {dst}" for src, attr, dst in edges]
+    return "\n".join(lines) if lines else "tfguard: no references between blocks"
+
+
 def build_server():
     """Build the MCP server. Requires the ``mcp`` extra."""
     from mcp.server.fastmcp import FastMCP  # noqa: PLC0415 - optional dependency
@@ -207,6 +233,9 @@ def build_server():
     def demo(directory: str = "demo-workspace") -> str:
         return tfguard_demo_tool(directory)
 
+    def graph(path: str) -> str:
+        return tfguard_graph_tool(path)
+
     # FastMCP reads fn.__doc__ at registration time; copy the manifest's
     # description onto each wrapper *before* mcp.tool() runs so the agent
     # sees the same text the tests and docs promise.
@@ -217,6 +246,7 @@ def build_server():
         ("tfguard_parse", parse),
         ("tfguard_taint", taint),
         ("tfguard_demo", demo),
+        ("tfguard_graph", graph),
     ):
         fn.__doc__ = descriptions[name]
         mcp.tool(name=name)(fn)

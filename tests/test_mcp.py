@@ -13,9 +13,9 @@ import pytest
 from tfguard import mcp_server
 
 
-def test_manifest_has_six_tools_with_descriptions():
+def test_manifest_has_seven_tools_with_descriptions():
     manifest = mcp_server.tool_manifest()
-    assert len(manifest) == 6
+    assert len(manifest) == 7
     for tool in manifest:
         assert tool["name"].startswith("tfguard_")
         assert tool["description"].strip()
@@ -114,6 +114,16 @@ def test_demo_tool(tmp_path):
     assert "TFG001" in out
 
 
+def test_graph_tool_finds_the_demo_references(tmp_path):
+    """The demo workspace wires a subnet to a VPC and a role; the graph must
+    show those edges, not an empty result."""
+    directory = str(tmp_path / "g")
+    mcp_server.tfguard_demo_tool(directory)
+    out = mcp_server.tfguard_graph_tool(directory)
+    assert "->" in out, out
+    assert "aws_vpc" in out or "aws_iam_role" in out or "aws_security_group" in out
+
+
 def test_build_server_is_guarded_by_the_extra():
     """Without the extra, building the server must fail loudly, not silently."""
     if importlib.util.find_spec("mcp") is None:
@@ -122,8 +132,8 @@ def test_build_server_is_guarded_by_the_extra():
     else:  # pragma: no cover - only when the extra is installed
         server = mcp_server.build_server()
         names = [t.name for t in _sync_list(server)]
-        assert len(names) == 6
-        for expected in ("tfguard_scan", "tfguard_rules", "tfguard_explain", "tfguard_parse", "tfguard_taint", "tfguard_demo"):
+        assert len(names) == 7
+        for expected in ("tfguard_scan", "tfguard_rules", "tfguard_explain", "tfguard_parse", "tfguard_taint", "tfguard_demo", "tfguard_graph"):
             assert expected in names
 
 
