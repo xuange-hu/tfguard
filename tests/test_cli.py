@@ -65,6 +65,25 @@ def test_fail_on_critical_passes_when_only_medium_is_present(capsys, tmp_path):
     assert code == 0
 
 
+def test_fail_on_none_never_fails(capsys, tmp_path):
+    """`none` is the report-only gate: an open 0.0.0.0/0 ingress exits 1 at
+    high, and 0 when the operator asked not to gate on it."""
+    path = os.path.join(str(tmp_path), "ws")
+    os.makedirs(path)
+    with open(os.path.join(path, "main.tf"), "w", encoding="utf-8") as fh:
+        fh.write(
+            'resource "aws_security_group" "web" {\n'
+            "  ingress {\n"
+            "    from_port   = 22\n"
+            "    to_port     = 22\n"
+            '    cidr_blocks = ["0.0.0.0/0"]\n'
+            "  }\n"
+            "}\n"
+        )
+    assert _run(capsys, ["scan", path, "--fail-on", "high"])[0] == 1
+    assert _run(capsys, ["scan", path, "--fail-on", "none"])[0] == 0
+
+
 def test_min_severity_filters(capsys, tmp_path):
     path = os.path.join(str(tmp_path), "ws")
     os.makedirs(path)

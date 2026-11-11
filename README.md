@@ -6,7 +6,7 @@
 from scratch, credential tracing and cross-block relationships — with zero
 dependencies.**
 
-[![tests](https://img.shields.io/badge/tests-262%20passing-2ea44f)](https://github.com/xuange-hu/tfguard/actions)
+[![tests](https://img.shields.io/badge/tests-263%20passing-2ea44f)](https://github.com/xuange-hu/tfguard/actions)
 [![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab)](https://pypi.org/project/tfguard/)
 [![dependencies](https://img.shields.io/badge/dependencies-0-2ea44f)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE)
@@ -322,7 +322,7 @@ Both halves are asserted in `tests/test_demo.py`.
 git clone https://github.com/xuange-hu/tfguard
 cd tfguard
 pip install -e ".[mcp]" pytest ruff
-pytest                 # 262 tests
+pytest                 # 263 tests
 ruff check src tests
 ```
 

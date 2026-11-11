@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--output", help="write the report to a file instead of stdout")
     p_scan.add_argument(
         "--fail-on",
-        choices=SEVERITIES,
+        choices=(*SEVERITIES, "none"),
         default=None,
         help="exit 1 when a finding at or above this severity is present",
     )
@@ -168,7 +168,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
             args.output,
         )
 
-    if args.fail_on:
+    if args.fail_on and args.fail_on != "none":
         floor = _rank(args.fail_on)
         if any(_rank(f.severity) <= floor for f in findings):
             return EXIT_FINDINGS
