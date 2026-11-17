@@ -1,5 +1,10 @@
 # tfguard · 中文说明
 
+[![tests](https://img.shields.io/badge/tests-264-brightgreen)](https://github.com/xuange-hu/tfguard/actions)
+[![python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![deps](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](https://github.com/xuange-hu/tfguard/blob/main/pyproject.toml)
+
 [English README](README.md) · 零依赖 Terraform / OpenTofu 配置审计。
 
 **一句话**：`password = var.db_password` 看着像「用了变量所以安全」，真正那个
